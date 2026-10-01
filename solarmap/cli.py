@@ -68,14 +68,21 @@ def cmd_detect(a):
     if a.threshold is not None:
         det.threshold = a.threshold
     store = _store(a)
-    rows = []
+    part = w / "predictions.partial.csv"   # 途中経過。中断しても続きから再開できる
+    rows = pd.read_csv(part).to_dict("records") if part.exists() else []
+    done = {r["bid"] for r in rows}
+    if done:
+        print(f"[detect] 再開: {len(done)} 棟は判定済み")
     for i, r in enumerate(b.itertuples()):
+        if r.bid in done:
+            continue
         c = building_crop(r.geometry, store)
         ok = c.missing == 0
         s = det.score(c) if ok else 0.0
         rows.append({"bid": r.bid, "score": s, "pred": bool(ok and s >= det.threshold), "valid": ok})
-        if (i + 1) % 2000 == 0:
-            print(f"[detect] {i+1}/{len(b)}")
+        if len(rows) % 1000 == 0:
+            pd.DataFrame(rows).to_csv(part, index=False)
+            print(f"[detect] {len(rows)}/{len(b)}", flush=True)
     df = pd.DataFrame(rows)
     df.to_csv(w / "predictions.csv", index=False)
     (w / "detector.json").write_text(json.dumps({"name": det.name, "threshold": det.threshold}))
