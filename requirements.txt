@@ -1,0 +1,14 @@
+geopandas>=1.0
+shapely>=2.0
+pyproj
+pyogrio
+pandas
+numpy
+pillow
+folium
+branca
+lxml
+requests
+pytest
+# 検出器に YOLO を使う場合のみ（重いので任意）:
+# ultralytics
