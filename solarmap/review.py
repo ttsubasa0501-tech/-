@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import base64
 import html
 import json
 from pathlib import Path
@@ -61,6 +62,9 @@ def build_review(pred: pd.DataFrame, bld: gpd.GeoDataFrame, store: TileStore, ou
                       "lat": round(float(g.lat), 6), "lon": round(float(g.lon), 6),
                       "area": round(float(g.area_m2), 1), "town": g.get("S_NAME", "")})
     pd.DataFrame(items).to_csv(out_dir / "review_sample.csv", index=False)
+    for it in items:  # 単一 HTML で完結するよう画像を埋め込む
+        b64 = base64.b64encode((out_dir / "img" / f"{it['bid']}.jpg").read_bytes()).decode()
+        it["src"] = "data:image/jpeg;base64," + b64
     page = out_dir / "review.html"
     page.write_text(_HTML.replace("__DATA__", json.dumps({"items": items, "totals": totals},
                                                          ensure_ascii=False))
@@ -107,7 +111,7 @@ const g=document.getElementById("g");
 D.items.forEach((it,i)=>{
  const c=document.createElement("div");c.className="card "+(it.pred?"pos":"neg");
  const u=`https://maps.gsi.go.jp/#19/${it.lat}/${it.lon}/&base=seamlessphoto`;
- c.innerHTML=`<img loading="lazy" src="img/${it.bid}.jpg">
+ c.innerHTML=`<img loading="lazy" src="${it.src}">
  <div class="meta">#${i+1} ${it.bid} ${it.town||""} / 面積${it.area}㎡ / モデル判定: <b>${it.pred?"あり":"なし"}</b> (score ${it.score}) / <a href="${u}" target="_blank">地理院地図</a></div>
  <div>${[["yes","パネルあり"],["no","パネルなし"],["unsure","判別不能"]].map(([v,t])=>
  `<label><input type="radio" name="${it.bid}" value="${v}" ${L[it.bid]==v?"checked":""}>${t}</label>`).join("")}</div>`;
