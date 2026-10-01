@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import aggregate as agg
 from . import buildings as bl
-from . import estat, fgd, mapout, review
+from . import estat, fgd, mapout, review, vtile
 from .config import TILE_ZOOM, WARDS
 from .detect import make_detector
 from .tiles import TileStore, building_crop, needed_tiles
@@ -38,7 +38,10 @@ def cmd_households(a):
 def cmd_buildings(a):
     w = Path(a.work)
     boundary = gpd.read_file(w / "boundary.gpkg")
-    raw = fgd.load_bldA([Path(p) for p in a.gml])
+    if a.gml:
+        raw = fgd.load_bldA([Path(p) for p in a.gml])
+    else:  # 基盤地図情報 GML が無ければ国土地理院ベクトルタイル(BldA)を使う
+        raw = vtile.load_bldA_vtile(boundary, w / "vtiles", workers=a.workers)
     b = bl.extract_detached_candidates(raw, boundary, a.min_area, a.max_area, a.min_compact,
                                        tuple(a.types) if a.types else None)
     b.merge(boundary[["KEY_CODE", "S_NAME"]], on="KEY_CODE").to_file(w / "buildings.gpkg", driver="GPKG")
@@ -60,7 +63,8 @@ def cmd_tiles(a):
 def cmd_detect(a):
     w = Path(a.work)
     b = gpd.read_file(w / "buildings.gpkg")
-    det = make_detector(a.detector)
+    kw = {} if a.detector == "baseline" else {"conf": a.conf, "imgsz": a.imgsz, "min_overlap": a.min_overlap}
+    det = make_detector(a.detector, **kw)
     if a.threshold is not None:
         det.threshold = a.threshold
     store = _store(a)
@@ -120,10 +124,10 @@ def main(argv=None):
     s = sub.add_parser("boundary", help="1. e-Stat 小地域境界"); s.add_argument("--file")
     s.set_defaults(f=cmd_boundary)
     s = sub.add_parser("households", help="1. 一戸建世帯数(統計GIS CSV)")
-    s.add_argument("--file"); s.add_argument("--stats-id"); s.add_argument("--keyword", default="一戸建")
+    s.add_argument("--file"); s.add_argument("--stats-id", default="T001086"); s.add_argument("--keyword", default="一戸建")
     s.set_defaults(f=cmd_households)
     s = sub.add_parser("buildings", help="2. 基盤地図情報 BldA から戸建て候補抽出")
-    s.add_argument("gml", nargs="+"); s.add_argument("--min-area", type=float, default=50)
+    s.add_argument("gml", nargs="*"); s.add_argument("--workers", type=int, default=4); s.add_argument("--min-area", type=float, default=50)
     s.add_argument("--max-area", type=float, default=250)
     s.add_argument("--min-compact", type=float, default=0.6)
     s.add_argument("--types", nargs="*"); s.set_defaults(f=cmd_buildings)
@@ -135,6 +139,8 @@ def main(argv=None):
         s.add_argument("--workers", type=int, default=4)
         if name == "detect":
             s.add_argument("--detector", default="baseline"); s.add_argument("--threshold", type=float)
+            s.add_argument("--conf", type=float, default=0.25); s.add_argument("--imgsz", type=int, default=640)
+            s.add_argument("--min-overlap", type=float, default=0.1)
         if name == "review":
             s.add_argument("-n", type=int, default=100); s.add_argument("--seed", type=int, default=0)
         s.set_defaults(f=fn)

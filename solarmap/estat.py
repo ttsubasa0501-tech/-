@@ -49,8 +49,13 @@ def load_boundary(path: Path) -> gpd.GeoDataFrame:
 
 
 def download_stats(stats_id: str, code: str, out_dir: Path) -> Path:
-    return _download(ESTAT_STATS_URL.format(stats_id=stats_id, code=code),
-                     out_dir / f"stats_{stats_id}_{code}.csv")
+    """統計GIS の CSV ダウンロード（実体は txt 入りの zip）。展開した .txt のパスを返す。"""
+    z = _download(ESTAT_STATS_URL.format(stats_id=stats_id, code=code),
+                  out_dir / f"stats_{stats_id}_{code}.zip")
+    d = out_dir / f"stats_{stats_id}_{code}"
+    with zipfile.ZipFile(z) as zf:
+        zf.extractall(d)
+    return next(d.glob("*.txt"))
 
 
 def load_detached_households(path: Path, column_keyword: str = "一戸建") -> pd.DataFrame:
@@ -58,6 +63,7 @@ def load_detached_households(path: Path, column_keyword: str = "一戸建") -> p
 
     CSV は 1 行目に項目 ID(KEY_CODE, T001...)、2 行目に日本語項目名、3 行目以降がデータ
     という形式を想定する（2 行目が数値なら 1 行ヘッダとして扱う）。
+    値の "-" は 0、"X"(秘匿) は欠損(NaN)として扱う。
     列名に column_keyword を含む列のうち、先頭のものを使う。複数ある場合は警告し候補を表示。
     """
     raw = pd.read_csv(path, header=None, dtype=str, encoding="cp932")
@@ -74,10 +80,12 @@ def load_detached_households(path: Path, column_keyword: str = "一戸建") -> p
     if len(cands) > 1:
         print("[estat] 候補が複数あります。先頭を使用:", [names[i] for i in cands])
     ci = cands[0]
+    val = body.iloc[:, ci].str.strip().str.replace(",", "", regex=False).replace("-", "0")
     out = pd.DataFrame({
         "KEY_CODE": body.iloc[:, ids.index("KEY_CODE")].astype(str).str.strip(),
-        "detached_households": pd.to_numeric(
-            body.iloc[:, ci].str.replace(",", "", regex=False), errors="coerce"),
+        "detached_households": pd.to_numeric(val, errors="coerce"),   # X(秘匿) -> NaN
     })
+    out = out.drop_duplicates("KEY_CODE")
+    print(f"[estat] 秘匿(X)等で欠損: {out['detached_households'].isna().sum()} 地区")
     print(f"[estat] 一戸建列: {names[ci]!r}  合計={out['detached_households'].sum():.0f}")
     return out

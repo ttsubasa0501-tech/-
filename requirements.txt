@@ -9,6 +9,7 @@ folium
 branca
 lxml
 requests
+mapbox-vector-tile
 pytest
 # 検出器に YOLO を使う場合のみ（重いので任意）:
 # ultralytics
