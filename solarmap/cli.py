@@ -94,6 +94,8 @@ def cmd_aggregate(a):
     boundary = gpd.read_file(w / "boundary.gpkg")
     b = gpd.read_file(w / "buildings.gpkg")
     pred = pd.read_csv(w / "predictions.csv")
+    if a.threshold is not None:  # 保存済みスコアからしきい値だけ変えて再集計
+        pred["pred"] = pred["valid"] & (pred["score"] >= a.threshold)
     hh = pd.read_csv(w / "households.csv", dtype={"KEY_CODE": str})
     out = agg.aggregate(boundary, b, pred, hh)
     mapout.write_geojson(out, w / "solar_rate.geojson")
@@ -151,7 +153,8 @@ def main(argv=None):
         if name == "review":
             s.add_argument("-n", type=int, default=100); s.add_argument("--seed", type=int, default=0)
         s.set_defaults(f=fn)
-    s = sub.add_parser("aggregate", help="5-6. 集計と GeoJSON/HTML 出力"); s.set_defaults(f=cmd_aggregate)
+    s = sub.add_parser("aggregate", help="5-6. 集計と GeoJSON/HTML 出力"); s.add_argument("--threshold", type=float)
+    s.set_defaults(f=cmd_aggregate)
     s = sub.add_parser("evaluate", help="目視ラベルから精度算出"); s.add_argument("labels")
     s.set_defaults(f=cmd_evaluate)
 
