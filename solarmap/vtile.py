@@ -65,6 +65,50 @@ def _to_lonlat(tx, ty, px, py, z):
     return lon, lat
 
 
+def decode_tile(blob: bytes | None, tx: int, ty: int, z: int = ZOOM) -> tuple[list[dict], int]:
+    """1 タイル分の BldA を [{fgd_fid, bld_type, geometry}] にする。(行, 余白端で切れた断片数) を返す。
+
+    隣接タイルの余白で重複するため、「重心がタイル本体内」かつ「余白端で切れていない」建物だけ採用する。
+    """
+    lo, hi = -BUFFER + 1, EXTENT + BUFFER - 1
+    rows, clipped = [], 0
+    if not blob:
+        return rows, clipped
+    layer = mvt.decode(blob, default_options={"y_coord_down": True}).get("BldA")
+    for f in (layer["features"] if layer else []):
+        g = f["geometry"]
+        polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
+        for rings in polys:
+            a = np.asarray(rings[0], float)
+            if len(a) < 4:
+                continue
+            if a.min() < lo or a.max() > hi:
+                clipped += 1           # 余白端で切れた断片（隣タイルに完全形がある）
+                continue
+            cx, cy = a[:, 0].mean(), a[:, 1].mean()
+            if not (0 <= cx < EXTENT and 0 <= cy < EXTENT):
+                continue               # 他タイルが本体として持つ
+            ring_ll = lambda r: list(zip(*_to_lonlat(tx, ty, np.asarray(r, float)[:, 0],
+                                                     np.asarray(r, float)[:, 1], z)))
+            try:
+                poly = Polygon(ring_ll(rings[0]), [ring_ll(h) for h in rings[1:] if len(h) >= 4])
+            except ValueError:
+                continue
+            rows.append({"fgd_fid": None, "bld_type": TYPES.get(f["properties"].get("vt_code")),
+                         "geometry": poly})
+    return rows, clipped
+
+
+def tile_of(lon: float, lat: float, z: int = ZOOM) -> tuple[int, int]:
+    n = 2 ** z
+    return (int((lon + 180) / 360 * n),
+            int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n))
+
+
+def fetch_tile(tx: int, ty: int, cache: Path, z: int = ZOOM) -> bytes | None:
+    return _fetch(((tx, ty), cache, z))[1]
+
+
 def load_bldA_vtile(boundary: gpd.GeoDataFrame, cache: Path, z: int = ZOOM,
                     workers: int = 4) -> gpd.GeoDataFrame:
     """境界(町丁目)の範囲を覆うタイルから BldA を読み、EPSG:6668 の GeoDataFrame にする。
@@ -75,35 +119,11 @@ def load_bldA_vtile(boundary: gpd.GeoDataFrame, cache: Path, z: int = ZOOM,
     print(f"[vtile] z{z} タイル {len(tiles)} 枚")
     with ThreadPoolExecutor(workers) as ex:
         data = list(ex.map(_fetch, [(t, cache, z) for t in tiles]))
-    lo, hi = -BUFFER + 1, EXTENT + BUFFER - 1
     rows, clipped = [], 0
     for (tx, ty), blob in data:
-        if not blob:
-            continue
-        layer = mvt.decode(blob, default_options={"y_coord_down": True}).get("BldA")
-        if not layer:
-            continue
-        for f in layer["features"]:
-            g = f["geometry"]
-            polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
-            for rings in polys:
-                a = np.asarray(rings[0], float)
-                if len(a) < 4:
-                    continue
-                if a.min() < lo or a.max() > hi:
-                    clipped += 1           # 余白端で切れた断片（隣タイルに完全形がある）
-                    continue
-                cx, cy = a[:, 0].mean(), a[:, 1].mean()
-                if not (0 <= cx < EXTENT and 0 <= cy < EXTENT):
-                    continue               # 他タイルが本体として持つ
-                ring_ll = lambda r: list(zip(*_to_lonlat(tx, ty, np.asarray(r, float)[:, 0],
-                                                         np.asarray(r, float)[:, 1], z)))
-                try:
-                    poly = Polygon(ring_ll(rings[0]), [ring_ll(h) for h in rings[1:] if len(h) >= 4])
-                except ValueError:
-                    continue
-                rows.append({"fgd_fid": None, "bld_type": TYPES.get(f["properties"].get("vt_code")),
-                             "geometry": poly})
+        r, c = decode_tile(blob, tx, ty, z)
+        rows.extend(r)
+        clipped += c
     print(f"[vtile] 建物 {len(rows)} 棟（余白端で切れた断片 {clipped} 件は除外）")
     if not rows:
         raise ValueError("建物が取得できませんでした")

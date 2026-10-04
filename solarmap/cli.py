@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import aggregate as agg
 from . import buildings as bl
-from . import estat, fgd, mapout, review, vtile
+from . import estat, fgd, hokkaido, mapout, review, roofsample, vtile
 from .config import TILE_ZOOM, WARDS
 from .detect import make_detector
 from .tiles import TileStore, building_crop, needed_tiles
@@ -89,6 +89,21 @@ def cmd_detect(a):
     print(f"[detect] {det.name}: 有効 {df.valid.sum()}/{len(df)}, パネルあり {df.pred.sum()}")
 
 
+def cmd_hk_units(a):
+    g = hokkaido.build_units(Path(a.work))
+    print(f"[hk-units] {len(g)} 区画, 一戸建 {g.detached.sum():.0f} 世帯, {g.muni.nunique()} 市区町村")
+
+
+def cmd_roofsample(a):
+    w = Path(a.work)
+    units = gpd.read_file(w / "units.gpkg")
+    s = roofsample.sample_houses(units, w / "vtiles", a.n, a.seed)
+    store = TileStore(w / "tiles", TILE_ZOOM, delay=0.02)
+    store.prefetch(needed_tiles(s.geometry, TILE_ZOOM, 18), 8)
+    page = roofsample.build_page(s, store, w / "roof_review" / "roof_review.html")
+    print(f"[roofsample] {len(s)} 軒 -> {page}")
+
+
 def cmd_aggregate(a):
     w = Path(a.work)
     boundary = gpd.read_file(w / "boundary.gpkg")
@@ -153,6 +168,10 @@ def main(argv=None):
         if name == "review":
             s.add_argument("-n", type=int, default=100); s.add_argument("--seed", type=int, default=0)
         s.set_defaults(f=fn)
+    s = sub.add_parser("hk-units", help="北海道全域の町丁目別 一戸建世帯数"); s.set_defaults(f=cmd_hk_units)
+    s = sub.add_parser("roofsample", help="屋根形状ラベル用の標本ページ")
+    s.add_argument("-n", type=int, default=150); s.add_argument("--seed", type=int, default=0)
+    s.set_defaults(f=cmd_roofsample)
     s = sub.add_parser("aggregate", help="5-6. 集計と GeoJSON/HTML 出力"); s.add_argument("--threshold", type=float)
     s.set_defaults(f=cmd_aggregate)
     s = sub.add_parser("evaluate", help="目視ラベルから精度算出"); s.add_argument("labels")
