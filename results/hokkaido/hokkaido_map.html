@@ -52,8 +52,10 @@ $("fs").value=Math.round(D.flat.sap*100);$("fo").value=Math.round(D.flat.other*1
 const flatOf=m=>(m.sap?+$("fs").value:+$("fo").value)/100;
 function calc(m,det){const own=det*m.own,nw1=own*m.new,nw2=det*m.nbr,nw=nw1+nw2,ns=nw1*(1-m.sol)+nw2*(1-m.soln),fin=ns*(1-flatOf(m));return{det,own,nw,nw2,ns,fin}}
 const map=L.map("map",{preferCanvas:true}).setView([43.4,142.6],7);
-const osm=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
-const sat=L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",{maxZoom:18,attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>'});
+const GSI='<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>';
+const pale=L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",{maxZoom:18,attribution:GSI}).addTo(map);
+const std=L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",{maxZoom:18,attribution:GSI});
+const sat=L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",{maxZoom:18,attribution:GSI});
 let metric="n",layer,dots,circle,center=null;
 const RAD=v=>Math.round(100*Math.pow(10,v/100*2.3));  // 100m〜20km
 function rank(){const rows=M.map((m,i)=>{const c=calc(m,m.det);return{i,name:m.name,n:c.fin,det:m.det,share:m.det?c.fin/m.det:0}});return rows}
@@ -61,7 +63,7 @@ function color(v,max){const t=Math.min(1,Math.sqrt(v/max));const a=[255,247,200]
  return"rgb("+a.map((x,k)=>Math.round(x+(b[k]-x)*t)).join(",")+")"}
 function value(r){return metric==="n"?r.n:r.share}
 function draw(){const rows=rank(),max=Math.max(...rows.map(value));if(layer)map.removeLayer(layer);
- layer=L.geoJSON(D.geo,{style:f=>({color:"#789",weight:.7,fillOpacity:.75,fillColor:color(value(rows[f.properties.i]),max)}),
+ layer=L.geoJSON(D.geo,{style:f=>({color:"#789",weight:.7,fillOpacity:.6,fillColor:color(value(rows[f.properties.i]),max)}),
  onEachFeature:(f,l)=>{const r=rows[f.properties.i];l.bindTooltip(M[r.i].name+"　"+(metric==="n"?fmt(r.n)+"戸":(r.share*100).toFixed(1)+"%"));
  l.on("click",e=>{if(e.originalEvent.shiftKey||!$("circ")){} popup(l,r.i,e.latlng)})}}).addTo(map);
  layer.bringToBack();legend(max);table(rows);summary()}
@@ -92,6 +94,6 @@ $("fs").oninput=$("fo").oninput=draw;$("metric").onchange=e=>{metric=e.target.va
 $("rank").onclick=e=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;const f=layer.getLayers().find(l=>l.feature.properties.i==tr.dataset.i);if(f)map.fitBounds(f.getBounds())};
 $("csv").onclick=()=>{const s="市区町村,一戸建,持ち家,築20年以内,太陽光なし,陸屋根を除く対象戸数\n"+M.map(m=>{const c=calc(m,m.det);return[m.name,c.det,c.own,c.nw,c.ns,c.fin].map((v,k)=>k?Math.round(v):v).join(",")}).join("\n");
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+s],{type:"text/csv"}));a.download="hokkaido_target_by_municipality.csv";a.click()};
-L.control.layers({"地図":osm,"空中写真":sat},{}).addTo(map);
+L.control.layers({"淡色地図":pale,"標準地図":std,"空中写真":sat},{}).addTo(map);
 draw();
 </script></body></html>

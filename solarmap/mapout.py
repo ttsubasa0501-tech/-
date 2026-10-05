@@ -43,7 +43,8 @@ def write_html(gdf: gpd.GeoDataFrame, path: Path, panel_buildings: gpd.GeoDataFr
         g[c] = g[c].astype(object).where(g[c].notna(), "-")
     minx, miny, maxx, maxy = gdf.total_bounds
     m = folium.Map(location=[(miny + maxy) / 2, (minx + maxx) / 2], zoom_start=13,
-                   tiles="OpenStreetMap", control_scale=True)
+                   tiles="https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
+                   attr='<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>', control_scale=True)
     folium.TileLayer(
         "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",
         attr='<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
