@@ -51,6 +51,28 @@ def sample_houses(units: gpd.GeoDataFrame, cache: Path, n: int = 150, seed: int 
     return gpd.GeoDataFrame(out, crs=CRS_GEO)
 
 
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
+    if n == 0:
+        return (float("nan"),) * 3
+    p = k / n
+    d = 1 + z * z / n
+    c = p + z * z / (2 * n)
+    a = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return p, (c - a) / d, (c + a) / d
+
+
+def roof_stats(labels: pd.DataFrame) -> dict:
+    """ラベルCSV(label: flat/pitched/unsure/notHouse, sapporo) から陸屋根率を算出。判別不能・住宅でないは除外。"""
+    out = {}
+    for name, g in (("all", labels), ("sapporo", labels[labels["sapporo"]]), ("other", labels[~labels["sapporo"]])):
+        h = g[g["label"].isin(["flat", "pitched"])]
+        f = int((h["label"] == "flat").sum())
+        p, lo, hi = wilson(f, len(h))
+        out[name] = {"flat": f, "n": len(h), "unsure": int((g["label"] == "unsure").sum()),
+                     "rate": p, "lo": lo, "hi": hi}
+    return out
+
+
 def _image(geom, store: TileStore) -> bytes:
     c = building_crop(geom, store, margin=18)
     raw = Image.fromarray(c.img).resize((c.img.shape[1] * SCALE, c.img.shape[0] * SCALE), Image.LANCZOS)

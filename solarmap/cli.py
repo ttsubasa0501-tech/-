@@ -107,6 +107,13 @@ def cmd_hk_map(a):
     print(f"[hk-map] {out}  陸屋根を引く前の対象 {pre:,.0f} 戸（築20年以内・新築含む・持ち家・戸建て・太陽光なし）")
 
 
+def cmd_roofstats(a):
+    lab = pd.read_csv(a.labels, dtype={"muni": str})
+    lab["sapporo"] = lab["sapporo"].astype(str).str.lower() == "true"
+    for k, v in roofsample.roof_stats(lab).items():
+        print(f"{k}: 陸屋根 {v['flat']}/{v['n']} = {v['rate']*100:.0f}% (95%CI {v['lo']*100:.0f}〜{v['hi']*100:.0f}%) 判別不能 {v['unsure']}")
+
+
 def cmd_roofsample(a):
     w = Path(a.work)
     units = gpd.read_file(w / "units.gpkg")
@@ -186,6 +193,7 @@ def main(argv=None):
     s.add_argument("--flat-sapporo", type=float, default=0.0, help="札幌市の陸屋根率(%%)")
     s.add_argument("--flat-other", type=float, default=0.0, help="札幌市以外の陸屋根率(%%)")
     s.add_argument("--roof-note", default=""); s.set_defaults(f=cmd_hk_map)
+    s = sub.add_parser("roofstats", help="屋根ラベルCSVから陸屋根率"); s.add_argument("labels"); s.set_defaults(f=cmd_roofstats)
     s = sub.add_parser("roofsample", help="屋根形状ラベル用の標本ページ")
     s.add_argument("-n", type=int, default=150); s.add_argument("--seed", type=int, default=0)
     s.set_defaults(f=cmd_roofsample)
