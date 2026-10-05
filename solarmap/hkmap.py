@@ -43,7 +43,8 @@ def _points(units: gpd.GeoDataFrame, muni_index: dict, seed: int = 0) -> list:
 
 
 def build(units: gpd.GeoDataFrame, est: pd.DataFrame, out: Path, flat_sapporo: float = 0.0,
-          flat_other: float = 0.0, roof_note: str = "") -> Path:
+          flat_other: float = 0.0, roof_note: str = "", pins: pd.DataFrame | None = None,
+          pins_name: str = "") -> Path:
     est = est.reset_index(drop=True)
     idx = {m: i for i, m in enumerate(est["muni"])}
     # 市町村ポリゴン（区画を融合して簡略化）
@@ -62,7 +63,14 @@ def build(units: gpd.GeoDataFrame, est: pd.DataFrame, out: Path, flat_sapporo: f
               "soln": round(float(r.s_new11_det), 4), "nb": round(float(r.new_builds)), "sap": r.muni in SAPPORO_WARDS,
               "rural": bool(r.is_rural_default)} for r in est.itertuples()]
     pts = _points(units, idx)
-    data = {"munis": munis, "geo": {"type": "FeatureCollection", "features": feats}, "pts": pts,
+    pin_data = None
+    if pins is not None and len(pins):
+        pn = pins.sort_values("bid").reset_index(drop=True)
+        pin_data = {"name": pins_name,
+                    "ids": [b for b in pn["bid"]],
+                    "pts": [[round(r.lon, 5), round(r.lat, 5), int(round(r.score * 100)), int(round(r.area_m2)),
+                             r.S_NAME] for r in pn.itertuples()]}
+    data = {"pins": pin_data, "munis": munis, "geo": {"type": "FeatureCollection", "features": feats}, "pts": pts,
             "flat": {"sap": flat_sapporo, "other": flat_other}, "roofNote": roof_note}
     html = _HTML.replace("__DATA__", json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +116,22 @@ button{padding:5px 10px;border:1px solid var(--line);background:var(--bg);color:
 <div class="box"><b>色分けの濃さ</b>
 <div class="row"><input id="op" type="range" min="0" max="90" step="5" value="40"><b id="opv"></b></div>
 <div class="note">下げると空中写真がよく見えます。0%で色分けを消します。</div></div>
+<div class="box" id="pinbox" style="display:none"><b>家ごとのピン（<span id="pinname"></span>のみ・試作）</b>
+<div class="note">ピンは<b>対象条件の判定ではありません</b>。戸建てサイズの建物と、AIが「パネルあり」と判定した家です（的中率は低く、確認用の候補）。</div>
+<label><input type="checkbox" id="pc" checked> 戸建て候補（点）<span id="pcn" class="note"></span></label>
+<label><input type="checkbox" id="pa" checked> AIがパネルありと判定（赤ピン）<span id="pan" class="note"></span></label>
+<label>AIスコア <span id="ptv"></span> 以上</label><input id="pt" type="range" min="10" max="90" step="5" value="50">
+<div class="row" style="margin-top:6px"><button id="pgo">手稲区へ移動</button><button id="pcsv">確認ラベルをCSV保存</button></div>
+<div class="note" id="plab"></div>
+<div class="note">ピンを押すと写真リンクと「あり/なし」の記録欄が出ます。記録はこのブラウザに保存されます。</div></div>
+<details class="box"><summary><b>この数字の出し方</b></summary>
+<div class="note" style="line-height:1.6">
+<b>円内の戸建て数</b>: 国勢調査2020の町丁目別「一戸建」世帯数を、区画の面積に応じた点に分けて按分し、円に入る点を合計。<br>
+<b>→ 持ち家</b>: 住宅・土地統計調査2023の「持ち家一戸建 ÷ 一戸建」(市区町村別)を掛ける。<br>
+<b>→ 築20年以内</b>: 持ち家一戸建のうち2006年以降の築の割合(市区町村別)を掛け、2023.10以降の新築(着工統計)を足す。<br>
+<b>→ 太陽光なし</b>: 築20年以内の住宅の太陽光設置率(市区町村別・北海道平均へ補正)を引く。<br>
+<b>→ 陸屋根を除く</b>: 屋根ラベルの実測の陸屋根率(上のスライダー)を引く。<br>
+各行の右の%は、ひとつ前の行に対する割合です。</div></details>
 <div class="box"><b>円で集計</b>
 <div class="note">地図をクリックすると中心を置きます。</div>
 <label>半径 <span id="rv"></span></label><input id="r" type="range" min="0" max="100" step="1" value="40">
@@ -157,12 +181,12 @@ function summary(){let T={det:0,own:0,nw:0,ns:0,fin:0};
  }else{M.forEach(m=>{const c=calc(m,m.det);for(const k in T)T[k]+=c[k]});$("scope").textContent="北海道全体";$("circinfo").textContent=""}
  $("total").textContent=fmt(T.fin);
  const rows=[["戸建て",T.det],["持ち家(賃貸を除く)",T.own],["築20年以内(新築含む)",T.nw],["太陽光なし",T.ns],["陸屋根を除く",T.fin]];
- $("funnel").innerHTML=rows.map(([l,v])=>`<div><span>${l}</span><span class="n">${fmt(v)}</span></div><div class="bar"><i style="width:${T.det?100*v/T.det:0}%"></i></div>`).join("");
+ $("funnel").innerHTML=rows.map(([l,v],k)=>`<div><span>${l}${k?` <span class="note">(${rows[k-1][1]?(100*v/rows[k-1][1]).toFixed(1):"-"}%)</span>`:""}</span><span class="n">${fmt(v)}</span></div><div class="bar"><i style="width:${T.det?100*v/T.det:0}%"></i></div>`).join("");
  $("fsv").textContent=$("fs").value+"%";$("fov").textContent=$("fo").value+"%"}
 const fmtR=R=>R>=1000?(R/1000).toFixed(R>=10000?0:1)+" km":R+" m";
 function setCenter(ll){center=ll;drawCircle();summary()}
 function drawCircle(){if(circle)map.removeLayer(circle);if(!center)return;circle=L.circle(center,{radius:+RAD($("r").value),color:"#d62728",weight:2,fillOpacity:.08}).addTo(map)}
-map.on("click",e=>{if(!e.originalEvent._p)setCenter(e.latlng)});
+map.on("click",e=>{if(pinClick(e))return;setCenter(e.latlng)});
 $("r").oninput=()=>{$("rv").textContent=fmtR(+RAD($("r").value));drawCircle();summary()};$("rv").textContent=fmtR(+RAD($("r").value));
 $("clr").onclick=()=>{center=null;if(circle)map.removeLayer(circle);circle=null;summary()};
 $("fs").oninput=$("fo").oninput=draw;$("op").oninput=()=>{$("opv").textContent=$("op").value+"%";layer.setStyle({fillOpacity:+$("op").value/100,opacity:$("op").value>0?1:0})};$("opv").textContent=$("op").value+"%";$("metric").onchange=e=>{metric=e.target.value;draw()};
@@ -171,4 +195,42 @@ $("csv").onclick=()=>{const s="市区町村,一戸建,持ち家,築20年以内,�
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+s],{type:"text/csv"}));a.download="hokkaido_target_by_municipality.csv";a.click()};
 L.control.layers({"空中写真":sat,"淡色地図":pale,"標準地図":std},{}).addTo(map);
 draw();
+/* ---------------- 家ごとのピン ---------------- */
+const PD=D.pins;let LAB={};try{LAB=JSON.parse(localStorage.getItem("pin_labels_v1")||"{}")}catch(e){}
+const saveLab=()=>{try{localStorage.setItem("pin_labels_v1",JSON.stringify(LAB))}catch(e){}};
+if(PD){
+ $("pinbox").style.display="";$("pinname").textContent=PD.name;
+ const N=PD.pts.length,thr=()=>+$("pt").value/100;
+ const col=i=>LAB[PD.ids[i]]==="yes"?"#2ca02c":LAB[PD.ids[i]]==="no"?"#8a8a8a":LAB[PD.ids[i]]==="unsure"?"#ff9800":null;
+ const PL=L.Layer.extend({
+  onAdd(m){this._m=m;const c=this._c=L.DomUtil.create("canvas");c.style.position="absolute";c.style.pointerEvents="none";c.style.zIndex=450;m.getPanes().overlayPane.appendChild(c);m.on("moveend zoomend resize",this.draw,this);this.draw()},
+  onRemove(m){m.off("moveend zoomend resize",this.draw,this);this._c.remove()},
+  draw(){const m=this._m,s=m.getSize(),c=this._c;L.DomUtil.setPosition(c,m.containerPointToLayerPoint([0,0]));c.width=s.x;c.height=s.y;
+   const g=c.getContext("2d");g.clearRect(0,0,s.x,s.y);if(m.getZoom()<14)return;const b=m.getBounds();const r=m.getZoom()>=17?4:m.getZoom()>=16?3:2;
+   for(let i=0;i<N;i++){const p=PD.pts[i];if(p[1]<b.getSouth()||p[1]>b.getNorth()||p[0]<b.getWest()||p[0]>b.getEast())continue;
+    const q=m.latLngToContainerPoint([p[1],p[0]]);const cc=col(i);g.beginPath();g.arc(q.x,q.y,cc?r+1:r,0,6.283);g.fillStyle=cc||"rgba(255,255,255,.85)";g.fill();g.lineWidth=.6;g.strokeStyle="rgba(0,0,0,.5)";g.stroke()}}
+ });
+ const dots=new PL();dots.addTo(map);let red=L.layerGroup().addTo(map);window.__red=red;
+ function popupHtml(i){const p=PD.pts[i],id=PD.ids[i],t=LAB[id]||"";
+  return `<b>${id}</b> ${p[4]||""}<br>建築面積 約${p[3]}㎡ / AIスコア ${(p[2]/100).toFixed(2)}<br>
+  <a target="_blank" href="https://maps.gsi.go.jp/#19/${p[1]}/${p[0]}/&base=seamlessphoto">地理院地図で見る</a><br>
+  ${[["yes","パネルあり"],["no","なし"],["unsure","不明"]].map(([v,l])=>`<label style="display:inline;margin-right:8px"><input type="radio" name="pl" data-id="${id}" value="${v}" ${t===v?"checked":""}> ${l}</label>`).join("")}`}
+ function showPin(i){const p=PD.pts[i];L.popup({offset:[0,-4]}).setLatLng([p[1],p[0]]).setContent(popupHtml(i)).openOn(map)}
+ map.on("popupopen",e=>e.popup.getElement().querySelectorAll('input[name="pl"]').forEach(r=>r.onchange=()=>{LAB[r.dataset.id]=r.value;saveLab();dots.draw();redraw();labsum()}));
+ function redraw(){red.clearLayers();let n=0;const t=thr()*100;
+  if($("pa").checked)for(let i=0;i<N;i++){const p=PD.pts[i];if(p[2]<t)continue;n++;
+   L.circleMarker([p[1],p[0]],{radius:6,color:"#fff",weight:1.5,fillColor:col(i)||"#d62728",fillOpacity:1,bubblingMouseEvents:false}).on("click",()=>showPin(i)).addTo(red)}
+  $("pan").textContent=" "+n+"件";$("ptv").textContent=(+$("pt").value/100).toFixed(2)}
+ function labsum(){const v=Object.values(LAB);$("plab").textContent="記録済み: あり "+v.filter(x=>x==="yes").length+" / なし "+v.filter(x=>x==="no").length+" / 不明 "+v.filter(x=>x==="unsure").length}
+ window.pinClick=e=>{if(!$("pc").checked||map.getZoom()<14)return false;let best=-1,bd=14*14;const b=map.getBounds();
+  for(let i=0;i<N;i++){const p=PD.pts[i];if(p[1]<b.getSouth()||p[1]>b.getNorth()||p[0]<b.getWest()||p[0]>b.getEast())continue;
+   const q=map.latLngToContainerPoint([p[1],p[0]]),dx=q.x-e.containerPoint.x,dy=q.y-e.containerPoint.y,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}
+  if(best<0)return false;showPin(best);return true};
+ $("pc").onchange=()=>{$("pc").checked?dots.addTo(map):map.removeLayer(dots)};$("pcn").textContent=" "+N.toLocaleString("ja-JP")+"棟";
+ $("pa").onchange=redraw;$("pt").oninput=redraw;
+ $("pgo").onclick=()=>map.setView([43.12,141.24],15);
+ $("pcsv").onclick=()=>{const s="bid,lon,lat,ai_score,truth\n"+Object.keys(LAB).map(id=>{const i=PD.ids.indexOf(id);const p=PD.pts[i];return[id,p[0],p[1],(p[2]/100).toFixed(2),LAB[id]].join(",")}).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));a.download="pin_labels.csv";a.click()};
+ redraw();labsum();
+}else window.pinClick=()=>false;
 </script></body></html>"""

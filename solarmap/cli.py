@@ -101,8 +101,15 @@ def cmd_hk_map(a):
     F = jyutaku.build_factors(w, cu)
     est = jyutaku.assign_to_census(F, cu, jyutaku.fetch_new_builds(w))
     est.to_csv(w / "municipal_estimates.csv", index=False)
+    pins = None
+    if a.pins_work:   # 家ごとのピン(判定済みの区): 戸建て候補 + AI のスコア
+        pw = Path(a.pins_work)
+        b = gpd.read_file(pw / "buildings.gpkg")
+        pr = pd.read_csv(pw / "predictions.csv")
+        pins = b[["bid", "lon", "lat", "area_m2", "S_NAME"]].merge(pr[["bid", "score", "valid"]], on="bid")
+        pins["score"] = pins["score"].where(pins["valid"], 0.0)
     out = hkmap.build(units, est, w / "hokkaido_map.html", a.flat_sapporo / 100, a.flat_other / 100,
-                      a.roof_note)
+                      a.roof_note, pins, a.pins_name)
     pre = est["pre_roof"].sum()
     print(f"[hk-map] {out}  陸屋根を引く前の対象 {pre:,.0f} 戸（築20年以内・新築含む・持ち家・戸建て・太陽光なし）")
 
@@ -192,7 +199,10 @@ def main(argv=None):
     s = sub.add_parser("hk-map", help="北海道 対象戸数マップ(要 ESTAT_APP_ID)")
     s.add_argument("--flat-sapporo", type=float, default=0.0, help="札幌市の陸屋根率(%%)")
     s.add_argument("--flat-other", type=float, default=0.0, help="札幌市以外の陸屋根率(%%)")
-    s.add_argument("--roof-note", default=""); s.set_defaults(f=cmd_hk_map)
+    s.add_argument("--roof-note", default="")
+    s.add_argument("--pins-work", help="判定済みの作業ディレクトリ(例 work/teine)。家ごとのピンを載せる")
+    s.add_argument("--pins-name", default="")
+    s.set_defaults(f=cmd_hk_map)
     s = sub.add_parser("roofstats", help="屋根ラベルCSVから陸屋根率"); s.add_argument("labels"); s.set_defaults(f=cmd_roofstats)
     s = sub.add_parser("roofsample", help="屋根形状ラベル用の標本ページ")
     s.add_argument("-n", type=int, default=150); s.add_argument("--seed", type=int, default=0)
