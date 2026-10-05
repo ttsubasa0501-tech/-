@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import aggregate as agg
 from . import buildings as bl
-from . import estat, fgd, hokkaido, mapout, review, roofsample, vtile
+from . import estat, fgd, hkmap, hokkaido, jyutaku, mapout, review, roofsample, vtile
 from .config import TILE_ZOOM, WARDS
 from .detect import make_detector
 from .tiles import TileStore, building_crop, needed_tiles
@@ -94,6 +94,19 @@ def cmd_hk_units(a):
     print(f"[hk-units] {len(g)} 区画, 一戸建 {g.detached.sum():.0f} 世帯, {g.muni.nunique()} 市区町村")
 
 
+def cmd_hk_map(a):
+    w = Path(a.work)
+    units = gpd.read_file(w / "units.gpkg")
+    cu = units.groupby(["muni", "city_name"], as_index=False)["detached"].sum()
+    F = jyutaku.build_factors(w, cu)
+    est = jyutaku.assign_to_census(F, cu, jyutaku.fetch_new_builds(w))
+    est.to_csv(w / "municipal_estimates.csv", index=False)
+    out = hkmap.build(units, est, w / "hokkaido_map.html", a.flat_sapporo / 100, a.flat_other / 100,
+                      a.roof_note)
+    pre = est["pre_roof"].sum()
+    print(f"[hk-map] {out}  陸屋根を引く前の対象 {pre:,.0f} 戸（築20年以内・新築含む・持ち家・戸建て・太陽光なし）")
+
+
 def cmd_roofsample(a):
     w = Path(a.work)
     units = gpd.read_file(w / "units.gpkg")
@@ -169,6 +182,10 @@ def main(argv=None):
             s.add_argument("-n", type=int, default=100); s.add_argument("--seed", type=int, default=0)
         s.set_defaults(f=fn)
     s = sub.add_parser("hk-units", help="北海道全域の町丁目別 一戸建世帯数"); s.set_defaults(f=cmd_hk_units)
+    s = sub.add_parser("hk-map", help="北海道 対象戸数マップ(要 ESTAT_APP_ID)")
+    s.add_argument("--flat-sapporo", type=float, default=0.0, help="札幌市の陸屋根率(%%)")
+    s.add_argument("--flat-other", type=float, default=0.0, help="札幌市以外の陸屋根率(%%)")
+    s.add_argument("--roof-note", default=""); s.set_defaults(f=cmd_hk_map)
     s = sub.add_parser("roofsample", help="屋根形状ラベル用の標本ページ")
     s.add_argument("-n", type=int, default=150); s.add_argument("--seed", type=int, default=0)
     s.set_defaults(f=cmd_roofsample)
