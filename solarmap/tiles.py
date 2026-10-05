@@ -37,15 +37,15 @@ class TileStore:
     """ディスクキャッシュ付きタイル取得。offline=True ならネットワークに出ない。"""
 
     def __init__(self, root: Path, zoom: int = TILE_ZOOM, url: str = TILE_URL,
-                 offline: bool = False, delay: float = 0.0):
-        self.root, self.zoom, self.url = Path(root), zoom, url
+                 offline: bool = False, delay: float = 0.0, ext: str = "jpg"):
+        self.root, self.zoom, self.url, self.ext = Path(root), zoom, url, ext
         self.offline, self.delay = offline, delay
         self._session = requests.Session()
         self._session.headers["User-Agent"] = USER_AGENT
         self._get = lru_cache(maxsize=512)(self._load)
 
     def path(self, x: int, y: int) -> Path:
-        return self.root / str(self.zoom) / str(x) / f"{y}.jpg"
+        return self.root / str(self.zoom) / str(x) / f"{y}.{self.ext}"
 
     def _load(self, x: int, y: int) -> np.ndarray | None:
         p = self.path(x, y)

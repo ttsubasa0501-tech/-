@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import aggregate as agg
 from . import buildings as bl
-from . import estat, fgd, hkmap, hokkaido, jyutaku, mapout, review, roofsample, vtile
+from . import age, estat, fgd, hkmap, hokkaido, jyutaku, mapout, review, roofsample, vtile
 from .config import TILE_ZOOM, WARDS
 from .detect import make_detector
 from .tiles import TileStore, building_crop, needed_tiles
@@ -121,6 +121,25 @@ def cmd_roofstats(a):
         print(f"{k}: 陸屋根 {v['flat']}/{v['n']} = {v['rate']*100:.0f}% (95%CI {v['lo']*100:.0f}〜{v['hi']*100:.0f}%) 判別不能 {v['unsure']}")
 
 
+def cmd_age_features(a):
+    w = Path(a.work)
+    b = gpd.read_file(w / "buildings.gpkg")
+    store = TileStore(w / f"tiles_{a.year}", url=age.OLD_URL.replace("{year}", str(a.year)), delay=0.02, ext="png")
+    store.prefetch(needed_tiles(b.geometry, TILE_ZOOM, 12), 8)
+    f = age.extract_features(b, w, a.year, a.procs)
+    f.to_csv(w / "age_features.csv", index=False)
+    print(f"[age] 特徴量 {len(f)} 棟 -> {w/'age_features.csv'}")
+
+
+def cmd_age_review(a):
+    w = Path(a.work)
+    b = gpd.read_file(w / "buildings.gpkg")
+    f = pd.read_csv(w / "age_features.csv")
+    s = age.sample_for_review(f, a.n, seed=a.seed)
+    page = age.build_review_page(s, b, w, a.year, w / "age_review" / "age_review.html")
+    print(f"[age] {page}")
+
+
 def cmd_roofsample(a):
     w = Path(a.work)
     units = gpd.read_file(w / "units.gpkg")
@@ -204,6 +223,12 @@ def main(argv=None):
     s.add_argument("--pins-name", default="")
     s.set_defaults(f=cmd_hk_map)
     s = sub.add_parser("roofstats", help="屋根ラベルCSVから陸屋根率"); s.add_argument("labels"); s.set_defaults(f=cmd_roofstats)
+    s = sub.add_parser("age-features", help="築年推定: 古い写真(既定2008年度)との比較特徴量")
+    s.add_argument("--year", type=int, default=2008); s.add_argument("--procs", type=int, default=4)
+    s.set_defaults(f=cmd_age_features)
+    s = sub.add_parser("age-review", help="築年推定の目視ラベルページ")
+    s.add_argument("--year", type=int, default=2008); s.add_argument("-n", type=int, default=120)
+    s.add_argument("--seed", type=int, default=0); s.set_defaults(f=cmd_age_review)
     s = sub.add_parser("roofsample", help="屋根形状ラベル用の標本ページ")
     s.add_argument("-n", type=int, default=150); s.add_argument("--seed", type=int, default=0)
     s.set_defaults(f=cmd_roofsample)
