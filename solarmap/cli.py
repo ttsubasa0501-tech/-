@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import aggregate as agg
 from . import buildings as bl
-from . import age, estat, fgd, hkmap, hokkaido, jyutaku, mapout, review, roofsample, vtile
+from . import age, embed, estat, label3, fgd, hkmap, hokkaido, jyutaku, mapout, review, roofsample, vtile
 from .config import TILE_ZOOM, WARDS
 from .detect import make_detector
 from .tiles import TileStore, building_crop, needed_tiles
@@ -140,6 +140,18 @@ def cmd_age_review(a):
     print(f"[age] {page}")
 
 
+def cmd_label3(a):
+    w = Path(a.work)
+    b = gpd.read_file(w / "buildings.gpkg")
+    smp, meta = label3.sample(pd.read_csv(w / "age_features.csv"), pd.read_csv(w / "predictions.csv"), seed=a.seed)
+    page = label3.build_page(smp, meta, b, w, a.year, w / "label3" / "label3.html")
+    print(f"[label3] {len(smp)} 軒 / 母数 {meta['population']} -> {page}")
+
+
+def cmd_embed(a):
+    embed.run(Path(a.work), a.year, threads=a.threads)
+
+
 def cmd_roofsample(a):
     w = Path(a.work)
     units = gpd.read_file(w / "units.gpkg")
@@ -229,6 +241,12 @@ def main(argv=None):
     s = sub.add_parser("age-review", help="築年推定の目視ラベルページ")
     s.add_argument("--year", type=int, default=2008); s.add_argument("-n", type=int, default=120)
     s.add_argument("--seed", type=int, default=0); s.set_defaults(f=cmd_age_review)
+    s = sub.add_parser("label3", help="築年・屋根・太陽光をまとめて目視ラベルするページ")
+    s.add_argument("--year", type=int, default=2008); s.add_argument("--seed", type=int, default=0)
+    s.set_defaults(f=cmd_label3)
+    s = sub.add_parser("embed", help="全棟の画像特徴(DINOv2)を計算(途中再開可)")
+    s.add_argument("--year", type=int, default=2008); s.add_argument("--threads", type=int, default=3)
+    s.set_defaults(f=cmd_embed)
     s = sub.add_parser("roofsample", help="屋根形状ラベル用の標本ページ")
     s.add_argument("-n", type=int, default=150); s.add_argument("--seed", type=int, default=0)
     s.set_defaults(f=cmd_roofsample)
