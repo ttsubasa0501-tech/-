@@ -63,7 +63,10 @@ button{padding:5px 10px;border:1px solid var(--line);background:var(--bg);color:
 <label><input type="checkbox" id="pc" checked> 戸建て候補（点）<span id="pcn" class="note"></span></label>
 <label><input type="checkbox" id="pa" checked> AIがパネルありと判定（赤ピン）<span id="pan" class="note"></span></label>
 <label>AIスコア <span id="ptv"></span> 以上</label><input id="pt" type="range" min="10" max="90" step="5" value="50">
-<div class="row" style="margin-top:6px"><button id="pgo">手稲区へ移動</button><button id="pcsv">確認ラベルをCSV保存</button></div>
+<label><input type="checkbox" id="pfocus" checked> 円を置いたら、円内の戸建てを黄色で強調（円外は薄く）</label>
+<label><input type="checkbox" id="pex"> AIがパネルありと判定した家（スコア0.5以上）を訪問候補から除く</label>
+<div id="pinin" class="note" style="margin:4px 0"></div>
+<div class="row" style="margin-top:6px;flex-wrap:wrap"><button id="pgo">手稲区へ移動</button><button id="pincsv">円内の戸建てをCSV保存（訪問リスト）</button><button id="pcsv">確認ラベルをCSV保存</button></div>
 <div class="note" id="plab"></div>
 <div class="note">ピンを押すと写真リンクと「あり/なし」の記録欄が出ます。記録はこのブラウザに保存されます。</div></div>
 <details class="box"><summary><b>この数字の出し方</b></summary>
@@ -115,6 +118,8 @@ let lg;function legend(max){if(lg)map.removeControl(lg);lg=L.control({position:"
  const f=metric==="n"?fmt:(v=>(v*100).toFixed(0)+"%");d.innerHTML=[0,.1,.25,.5,.75,1].map(t=>`<div><i style="background:${color(t*t*max,max)}"></i>${f(t*t*max)}${t===1?"以上":""}</div>`).join("");return d};lg.addTo(map)}
 function table(rows){const s=[...rows].sort((a,b)=>value(b)-value(a)).slice(0,40);
  $("rank").innerHTML="<table><tr><th>市区町村</th><th>対象</th><th>一戸建</th></tr>"+s.map(r=>`<tr data-i="${r.i}"><td>${r.name}</td><td>${metric==="n"?fmt(r.n):(r.share*100).toFixed(1)+"%"}</td><td>${fmt(r.det)}</td></tr>`).join("")+"</table>"}
+function pinsInCircle(){const P2=D.pins;if(!P2||!center)return[];const R=+RAD($("r").value),cl=Math.cos(center.lat*Math.PI/180),out=[],ex=$("pex")&&$("pex").checked;
+ for(let i=0;i<P2.pts.length;i++){const p=P2.pts[i],dx=(p[0]-center.lng)*111320*cl,dy=(p[1]-center.lat)*110540,d=dx*dx+dy*dy;if(d<=R*R){if(ex&&p[2]>=50)continue;out.push([i,Math.sqrt(d)])}}return out}
 function summary(){let T={det:0,own:0,nw:0,ns:0,fin:0};
  if(center){const R=+RAD($("r").value),acc={};const cl=Math.cos(center.lat*Math.PI/180);
   for(let k=0;k<P.length;k+=1){const p=P[k];const dx=(p[0]-center.lng)*111320*cl,dy=(p[1]-center.lat)*110540;if(dx*dx+dy*dy<=R*R){acc[p[3]]=(acc[p[3]]||0)+p[2]}}
@@ -124,7 +129,7 @@ function summary(){let T={det:0,own:0,nw:0,ns:0,fin:0};
  $("total").textContent=fmt(T.fin);
  const rows=[["戸建て",T.det],["持ち家(賃貸を除く)",T.own],["築20年以内(新築含む)",T.nw],["太陽光なし",T.ns],["陸屋根を除く",T.fin]];
  $("funnel").innerHTML=rows.map(([l,v],k)=>`<div><span>${l}${k?` <span class="note">(${rows[k-1][1]?(100*v/rows[k-1][1]).toFixed(1):"-"}%)</span>`:""}</span><span class="n">${fmt(v)}</span></div><div class="bar"><i style="width:${T.det?100*v/T.det:0}%"></i></div>`).join("");
- $("fsv").textContent=$("fs").value+"%";$("fov").textContent=$("fo").value+"%"}
+ $("fsv").textContent=$("fs").value+"%";$("fov").textContent=$("fo").value+"%";if(window.updPinIn)window.updPinIn(T)}
 const fmtR=R=>R>=1000?(R/1000).toFixed(R>=10000?0:1)+" km":R+" m";
 function setCenter(ll){center=ll;drawCircle();summary()}
 function drawCircle(){if(circle)map.removeLayer(circle);if(!center)return;circle=L.circle(center,{radius:+RAD($("r").value),color:"#d62728",weight:2,fillOpacity:.08}).addTo(map)}
@@ -271,9 +276,11 @@ if(PD){
   onAdd(m){this._m=m;const c=this._c=L.DomUtil.create("canvas");c.style.position="absolute";c.style.pointerEvents="none";c.style.zIndex=450;m.getPanes().overlayPane.appendChild(c);m.on("moveend zoomend resize",this.draw,this);this.draw()},
   onRemove(m){m.off("moveend zoomend resize",this.draw,this);this._c.remove()},
   draw(){const m=this._m,s=m.getSize(),c=this._c;L.DomUtil.setPosition(c,m.containerPointToLayerPoint([0,0]));c.width=s.x;c.height=s.y;
-   const g=c.getContext("2d");g.clearRect(0,0,s.x,s.y);if(m.getZoom()<14)return;const b=m.getBounds();const r=m.getZoom()>=17?4:m.getZoom()>=16?3:2;
+   const g=c.getContext("2d");g.clearRect(0,0,s.x,s.y);if(m.getZoom()<14)return;const b=m.getBounds();const r=m.getZoom()>=17?4:m.getZoom()>=16?3:2;const foc=!!center&&$("pfocus").checked,R0=foc?+RAD($("r").value):0,cl0=foc?Math.cos(center.lat*Math.PI/180):1,exAI=$("pex").checked;
    for(let i=0;i<N;i++){const p=PD.pts[i];if(p[1]<b.getSouth()||p[1]>b.getNorth()||p[0]<b.getWest()||p[0]>b.getEast())continue;
-    const q=m.latLngToContainerPoint([p[1],p[0]]);const cc=col(i);g.beginPath();g.arc(q.x,q.y,cc?r+1:r,0,6.283);g.fillStyle=cc||"rgba(255,255,255,.85)";g.fill();g.lineWidth=.6;g.strokeStyle="rgba(0,0,0,.5)";g.stroke()}}
+    const q=m.latLngToContainerPoint([p[1],p[0]]);const cc=col(i);let fill="rgba(255,255,255,.85)",rad=cc?r+1:r;
+    if(foc){const dx=(p[0]-center.lng)*111320*cl0,dy=(p[1]-center.lat)*110540;if(dx*dx+dy*dy<=R0*R0){if(exAI&&p[2]>=50){fill="rgba(120,120,120,.85)"}else{fill="#ffd400";rad+=1.5}}else{fill="rgba(255,255,255,.22)";rad=Math.max(1.2,rad-1)}}
+    g.beginPath();g.arc(q.x,q.y,rad,0,6.283);g.fillStyle=cc||fill;g.fill();g.lineWidth=.6;g.strokeStyle="rgba(0,0,0,.5)";g.stroke()}}
  });
  const dots=new PL();dots.addTo(map);let red=L.layerGroup().addTo(map);window.__red=red;
  function popupHtml(i){const p=PD.pts[i],id=PD.ids[i],t=LAB[id]||"";
@@ -287,7 +294,7 @@ if(PD){
    L.circleMarker([p[1],p[0]],{radius:6,color:"#fff",weight:1.5,fillColor:col(i)||"#d62728",fillOpacity:1,bubblingMouseEvents:false}).on("click",()=>showPin(i)).addTo(red)}
   $("pan").textContent=" "+n+"件";$("ptv").textContent=(+$("pt").value/100).toFixed(2)}
  function labsum(){const v=Object.values(LAB);$("plab").textContent="記録済み: あり "+v.filter(x=>x==="yes").length+" / なし "+v.filter(x=>x==="no").length+" / 不明 "+v.filter(x=>x==="unsure").length}
- window.pinClick=e=>{if(!$("pc").checked||map.getZoom()<14)return false;let best=-1,bd=14*14;const b=map.getBounds();
+ window.pinClick=e=>{if(!$("pc").checked||map.getZoom()<16||e.originalEvent.shiftKey)return false;let best=-1,bd=9*9;const b=map.getBounds();
   for(let i=0;i<N;i++){const p=PD.pts[i];if(p[1]<b.getSouth()||p[1]>b.getNorth()||p[0]<b.getWest()||p[0]>b.getEast())continue;
    const q=map.latLngToContainerPoint([p[1],p[0]]),dx=q.x-e.containerPoint.x,dy=q.y-e.containerPoint.y,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}
   if(best<0)return false;showPin(best);return true};
@@ -296,6 +303,14 @@ if(PD){
  $("pgo").onclick=()=>map.setView([43.12,141.24],15);
  $("pcsv").onclick=()=>{const s="bid,lon,lat,ai_score,truth\n"+Object.keys(LAB).map(id=>{const i=PD.ids.indexOf(id);const p=PD.pts[i];return[id,p[0],p[1],(p[2]/100).toFixed(2),LAB[id]].join(",")}).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));a.download="pin_labels.csv";a.click()};
- redraw();labsum();
+
+ window.updPinIn=T=>{dots.draw();const el=$("pinin");if(!center){el.innerHTML="円を置くと、円内の戸建てが黄色になります（地図をクリック／円の半径はスライダー）。";return}
+  const ins=pinsInCircle(),n=ins.length,pc=n>0?T.fin/n:0;
+  const part=n<T.det*0.8;   // 戸建て候補が一戸建数より少ない=円の一部が建物データの無い範囲
+  el.innerHTML=`円内の戸建て候補 <b>${fmt(n)}棟</b>（${PD.name}の建物データ）／ 統計上の対象見込み <b>約${fmt(T.fin)}軒</b>（上の数字）<br>→ 候補1棟あたり対象の確率は <b>約${(pc*100).toFixed(1)}%</b>。どの家が対象かは分かりません。<br><span class="note">黄=円内の候補${$("pex").checked?"、灰=AIがパネルありと判定して除外":""}。店舗・小規模な共同住宅も戸建てサイズなら候補に入ります。${part?"円の一部は建物データのない範囲です。":""}</span>`};
+ $("pfocus").onchange=$("pex").onchange=()=>summary();
+ $("pincsv").onclick=()=>{const ins=pinsInCircle().sort((a,b)=>a[1]-b[1]);if(!ins.length){alert("先に手稲区内に円を置いてください");return}
+  dl("visit_list_in_circle.csv","bid,距離m,町丁目,建築面積m2,AIスコア,lat,lng,地理院地図\n"+ins.map(([i,d])=>{const q=PD.pts[i];return[PD.ids[i],Math.round(d),'"'+(q[4]||"")+'"',q[3],(q[2]/100).toFixed(2),q[1],q[0],"https://maps.gsi.go.jp/#19/"+q[1]+"/"+q[0]+"/&base=seamlessphoto"].join(",")}).join("\n"),"text/csv")};
+ redraw();labsum();summary();
 }else window.pinClick=()=>false;
 </script></body></html>
